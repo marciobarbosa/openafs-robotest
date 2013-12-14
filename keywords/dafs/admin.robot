@@ -12,6 +12,7 @@ fileserver is running
     program is running    salvageserver
     server is alive    7000
     server is alive    7003
+    run command    ${AFS_VOS} listvol ${AFS_HOST} -noauth
 
 fileserver is not running
     program is not running    dafileserver
