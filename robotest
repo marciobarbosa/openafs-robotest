@@ -1,0 +1,233 @@
+#!/bin/bash
+# Copyright (c) 2014, Sine Nomine Associates
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED 'AS IS' AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#------------------------------------------------------------------------------
+#
+# WARNING: This destroys all the AFS data on this system.
+#          RUN THIS ONLY A TEST SYSTEM!
+#
+set -e  # exit on error
+
+SETTINGS="site/local/settings.py"
+
+KRB5CCNAME="/tmp/krb5cc_robotest"
+export KRB5CCNAME
+
+#------------------------------------------------------------------------------
+# Run the Robotframework test suite.
+#
+# Generate an intermediate output and log file in case the tests fails. A final
+# report will be generated from the intermediate output files.
+#
+_run_test()
+{
+    SUITE="$1"
+    pybot --timestampoutputs --variablefile variables/common.py --variablefile "$SETTINGS" \
+          --outputdir output --output "output-$SUITE" --log "log-$SUITE" --report NONE \
+          --suite "$SUITE" tests
+}
+
+#------------------------------------------------------------------------------
+# Run the smoke test suite
+#
+# Run the smoke test suite, stopping if one of the sub-suites fails, since
+# later suites depend on actions of the predecessors. This avoids generating
+# a report and log filled with false errors. (RF does not have built in notion
+# of "skipped" tests.)
+#
+# Unless ROBOTEST_TEARDOWN is set to "no" in the settings file, the smoke
+# test cell will be destroyed automatically for the next run.
+#
+robotest_run()
+{
+    test -f $SETTINGS || { echo "run robotest setup" >&2; exit 1; }
+
+    # Preparing ...
+    source "$SETTINGS"
+    test ! -z "$ENV_INSTALL" || { echo "ENV_INSTALL missing" >&2; exit 1; }
+    if test "$ROBOTEST_TEARDOWN" = "yes" -a -f output/teardown_needed ; then
+        : Cleaning up previous failed run ...
+        sudo -n ./robotest teardown --force
+    fi
+    mkdir -p output
+    rm -f output/*.xml output/*.html
+
+    # Running tests ...
+    _run_test "precheck"
+    touch output/teardown_needed
+    _run_test "install_$ENV_INSTALL"
+    _run_test "new_cell_server"
+    _run_test "new_cell_client"
+
+    # Generating final report ...
+    rm -f output/*.html        # clean up intermediate reports
+    echo "Final Report"
+    rebot --outputdir output --output robotest.xml --name robotest output/*.xml
+    rm -f output/output-*.xml  # clean up intermediate data
+    if test "$ROBOTEST_TEARDOWN" = "yes" ; then
+        : Teardown ...
+        sudo -n ./robotest teardown --force
+    fi
+    echo "All tests passed."
+}
+
+#------------------------------------------------------------------------------
+# Create the site specific settings file.
+#
+# XXX: In order to make setup easier and less error prone, I need reduce the
+#      number of site specific settings.
+#
+robotest_setup()
+{
+    if test -f "$SETTINGS"; then
+        echo "settings file already exists: $SETTINGS" >&2
+        exit 0
+    fi
+    mkdir -p $(dirname "$SETTINGS")
+
+    # XXX: Prompt for settings here.
+
+    cat <<__EOF__ >"$SETTINGS"
+ROBOTEST_TEARDOWN="yes"
+AFS_HOST="<hostname>"
+ENV_FS="dafs"
+ENV_DIST="transarc"
+ENV_INSTALL="transarc"
+ENV_KEY="k5"
+IBM_DEST="<path>/dest"
+KRB_REALM="LOCALREALM"
+KRB_AFS_KEYTAB="site/local/keytabs/afs.keytab"
+KRB_RXKAD_KEYTAB="site/local/keytabs/rxkad.keytab"
+KRB_USER_KEYTAB="site/local/keytabs/robotest.keytab"
+RPM_AFSRELEASE="1"
+RPM_AFSVERSION=""
+RPM_PACKAGE_DIR="<path>"
+__EOF__
+}
+
+#------------------------------------------------------------------------------
+# Destroy the test cell.
+#
+# WARNING: This destroys all the local AFS data.
+#
+_teardown()
+{
+    set +e  # ignore errors in teardown
+    source $SETTINGS || { echo "run robotest setup"; exit 1; }
+
+    case "$ENV_DIST" in
+        redhat)
+            service openafs-server stop
+            service openafs-client stop
+            rmmod openafs
+            rpm --erase --noscripts openafs-server
+            rpm --erase --noscripts openafs-client kmod-openafs
+            rpm --erase --noscripts openafs-krb5
+            rpm --erase --noscripts openafs
+            rm -f /var/lock/subsys/openafs-server
+            rm -f /var/lock/subsys/openafs-client
+            rm -f /etc/sysconfig/openafs*
+            ;;
+        transarc)
+            /usr/afs/bin/bos shutdown localhost -localauth
+            umount /afs
+            rmmod libafs
+            test -d /usr/afsws || rm -rf /usr/afsws
+            ;;
+        *)
+            echo "warning: unknown ENV_DIST: $ENV_DIST"
+            ;;
+    esac
+
+    test -d /afs && rmdir /afs
+    test -d /usr/vice/etc && rm -rf /usr/vice/etc
+    test -d /usr/afs && rm -rf /usr/afs
+    killall bosserver
+    kdestroy
+
+    # create empty vice "partition"
+    rm -rf /vicepa/*
+    touch /vicepa/AlwaysAttach
+
+    rm -f output/teardown_needed
+    set -e  # resume exit on error
+}
+
+#------------------------------------------------------------------------------
+# Destroy the local test cell.
+#
+robotest_teardown()
+{
+    test -f "$SETTINGS" || { echo "run robotest setup"; exit 1; }
+
+    # Prehecks: Must be run as root and forced to proceed.
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -f|--force)
+                OPT_FORCE="yes"
+                ;;
+            *)
+                echo "usage: $0 teardown --force"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+    if [ $(id -u) -ne 0 ]; then
+        echo "$0: Must run as root." >&2
+        exit 1
+    fi
+    if [ "$OPT_FORCE" != "yes" ]; then
+        echo "$0: Skipping teardown; not forced" >&2
+        exit 1
+    fi
+
+    # Hide stderr messages unless debugging with bash -x.
+    if [ -o xtrace ]; then
+        _teardown
+    else
+        _teardown 2>/dev/null
+    fi
+}
+
+_usage()
+{
+    echo "usage: robotest setup"
+    echo "       robotest run"
+    echo "       robotest teardown --force"
+}
+
+#------------------------------------------------------------------------------
+# Dispatch sub-commands.
+#
+ROBOTEST_CMD="$1"
+shift || { _usage; exit 1; }
+case "$ROBOTEST_CMD" in
+    setup)
+        robotest_setup "$@"
+        ;;
+    run)
+        robotest_run "$@"
+        ;;
+    teardown)
+        robotest_teardown "$@"
+        ;;
+    help)
+        _usage
+        ;;
+    *)
+        echo "unknown command" >&2
+        exit 1
+        ;;
+esac

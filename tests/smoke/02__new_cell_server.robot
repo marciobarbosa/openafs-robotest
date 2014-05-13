@@ -59,7 +59,13 @@ fileserver creation
     when create fileserver
     then fileserver is running
 
+# XXX: vos listvldb needs a correct client side csdb
+#      since the client was installed, it has a default csdb
+#      we have to do copy the server side config
 afs root volume creation
+    # xxx
+    sudo    sh -c 'test -h /usr/vice/etc/CellServDB || cp /usr/afs/etc/CellServDB /usr/vice/etc/CellServDB'
+    sudo    sh -c 'test -h /usr/vice/etc/ThisCell || cp /usr/afs/etc/ThisCell /usr/vice/etc/ThisCell'
     given volume does not exist    root.afs
     when create volume as root   root.afs
     then volume exists    root.afs

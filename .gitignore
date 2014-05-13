@@ -1,4 +1,3 @@
 *.pyc
-*.keytab
-settings
 output/
+site/
