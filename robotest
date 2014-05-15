@@ -14,9 +14,10 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #------------------------------------------------------------------------------
 #
-# WARNING: This destroys all the AFS data on this system.
-#          RUN THIS ONLY A TEST SYSTEM!
+# WARNING: This program destroys all of the AFS data on the local system.
+#          RUN THIS PROGRAM ON TEST SYSTEMS ONLY!
 #
+#------------------------------------------------------------------------------
 set -e  # exit on error
 
 SETTINGS="site/local/settings.py"
