@@ -20,23 +20,11 @@
 set -e  # exit on error
 
 SETTINGS="site/local/settings.py"
-
 KRB5CCNAME="/tmp/krb5cc_robotest"
-export KRB5CCNAME
+ROBOTEST_TEARDOWN="yes"
+ENV_INSTALL="transarc"
 
-#------------------------------------------------------------------------------
-# Run the Robotframework test suite.
-#
-# Generate an intermediate output and log file in case the tests fails. A final
-# report will be generated from the intermediate output files.
-#
-_run_test()
-{
-    SUITE="$1"
-    pybot --timestampoutputs --variablefile variables/common.py --variablefile "$SETTINGS" \
-          --outputdir output --output "output-$SUITE" --log "log-$SUITE" --report NONE \
-          --suite "$SUITE" tests
-}
+export KRB5CCNAME
 
 #------------------------------------------------------------------------------
 # Run the smoke test suite
@@ -47,36 +35,47 @@ _run_test()
 # of "skipped" tests.)
 #
 # Unless ROBOTEST_TEARDOWN is set to "no" in the settings file, the smoke
-# test cell will be destroyed automatically for the next run.
+# test cell will be destroyed automatically for the next run.  The teardown
+# is not needed if the precheck fails, since it does not make changes to the
+# test system.
 #
 robotest_run()
 {
-    test -f $SETTINGS || { echo "run robotest setup" >&2; exit 1; }
-
-    # Preparing ...
+    echo "Preparing ..."
+    test -f "$SETTINGS" || { echo "run robotest setup" >&2; exit 1; }
     source "$SETTINGS"
-    test ! -z "$ENV_INSTALL" || { echo "ENV_INSTALL missing" >&2; exit 1; }
-    if test "$ROBOTEST_TEARDOWN" = "yes" -a -f output/teardown_needed ; then
-        : Cleaning up previous failed run ...
+
+    if test -f output/teardown_needed -a "$ROBOTEST_TEARDOWN" = "yes"; then
+        echo "Teardown previous failed run ..."
         sudo -n ./robotest teardown --force
     fi
-    mkdir -p output
-    rm -f output/*.xml output/*.html
+    if test -d output; then
+        rm -f output/*
+    else
+        mkdir output
+    fi
 
-    # Running tests ...
-    _run_test "precheck"
-    touch output/teardown_needed
-    _run_test "install_$ENV_INSTALL"
-    _run_test "new_cell_server"
-    _run_test "new_cell_client"
+    echo "Running tests ..."
+    for SUITE in precheck install_$ENV_INSTALL new_cell_server new_cell_client
+    do
+        echo "Running test $SUITE ..."
+        test "$SUITE" = "precheck" || touch output/teardown_needed
+        pybot --timestampoutputs --variablefile variables/common.py --variablefile "$SETTINGS" \
+              --outputdir output --output "output-$SUITE" --log "log-$SUITE" --report NONE \
+              --suite "$SUITE" tests || { FAILED="yes"; break; }
+    done
 
-    # Generating final report ...
-    rm -f output/*.html        # clean up intermediate reports
-    echo "Final Report"
+    echo "Generating final report ..."
+    rm -f output/log-*.html        # clean up intermediate logs
     rebot --outputdir output --output robotest.xml --name robotest output/*.xml
     rm -f output/output-*.xml  # clean up intermediate data
-    if test "$ROBOTEST_TEARDOWN" = "yes" ; then
-        : Teardown ...
+
+    if test "$FAILED" = "yes"; then
+        exit 1  # skip teardown on failure (so we can debug)
+    fi
+
+    if test "$ROBOTEST_TEARDOWN" = "yes"; then
+        echo "Teardown ... "
         sudo -n ./robotest teardown --force
     fi
     echo "All tests passed."
