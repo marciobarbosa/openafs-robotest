@@ -14,7 +14,6 @@ Resource       keywords/utility.robot
 Resource       keywords/admin.robot
 Resource       keywords/${ENV_FS}/admin.robot
 Resource       keywords/${ENV_DIST}/init.robot
-Resource       keywords/kerberos.robot
 Resource       keywords/${ENV_KEY}/key.robot
 
 *** Test Case ***
@@ -75,3 +74,11 @@ cell root volume creation
     when create volume as root    root.cell
     then volume exists    root.cell
 
+
+*** Keywords ***
+Set kerberos realm
+    [arguments]    ${realm}
+    file should not exist    /usr/afs/etc/krb.conf
+    create file    /tmp/krb.conf    ${realm}
+    sudo    cp /tmp/krb.conf /usr/afs/etc/krb.conf
+    run    rm /tmp/krb.conf
