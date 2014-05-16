@@ -4,9 +4,6 @@ Library        libraries/Kerberos.py
 Resource       keywords/utility.robot
 
 *** Keywords ***
-afs service keytab should exist
-    file should exist    ${KRB_AFS_KEYTAB}
-
 afs service key should exist
     file should exist    /usr/afs/etc/KeyFile
 

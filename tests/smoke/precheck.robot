@@ -37,7 +37,7 @@ afs sysconfig should not exist
 
 kerberos keytab check
     file should exist    ${KRB_USER_KEYTAB}
-    afs service keytab should exist
+    File should exist    ${KRB_AFS_KEYTAB}
 
 kerberos ticket check
     should not have kerberos tickets
