@@ -43,8 +43,12 @@ export KRB5CCNAME
 robotest_run()
 {
     echo "Preparing ..."
-    test -f "$SETTINGS" || { echo "run robotest setup" >&2; exit 1; }
-    source "$SETTINGS"
+
+    source "$SETTINGS" || { echo "run robotest setup" >&2; exit 1; }
+    SUITES="$@"
+    if test -z "$SUITES"; then
+        SUITES="precheck install_$ENV_INSTALL new_cell_server new_cell_client"
+    fi
 
     if test -f output/teardown_needed -a "$ROBOTEST_TEARDOWN" = "yes"; then
         echo "Teardown previous failed run ..."
@@ -57,7 +61,7 @@ robotest_run()
     fi
 
     echo "Running tests ..."
-    for SUITE in precheck install_$ENV_INSTALL new_cell_server new_cell_client
+    for SUITE in $SUITES
     do
         echo "Running test $SUITE ..."
         test "$SUITE" = "precheck" || touch output/teardown_needed
@@ -72,10 +76,10 @@ robotest_run()
     rm -f output/output-*.xml  # clean up intermediate data
 
     if test "$FAILED" = "yes"; then
-        exit 1  # skip teardown on failure (so we can debug)
+        return 1  # skip teardown on failure (so we can debug)
     fi
 
-    if test "$ROBOTEST_TEARDOWN" = "yes"; then
+    if test -f output/teardown_needed -a "$ROBOTEST_TEARDOWN" = "yes"; then
         echo "Teardown ... "
         sudo -n ./robotest teardown --force
     fi
@@ -204,7 +208,7 @@ robotest_teardown()
 _usage()
 {
     echo "usage: robotest setup"
-    echo "       robotest run"
+    echo "       robotest run [suite ...]"
     echo "       robotest teardown --force"
 }
 
